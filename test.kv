@@ -1,0 +1,11 @@
+##:import Renderer test.Renderer
+ScreenManager:
+    HomeScreen:
+
+<HomeScreen>:
+    name: "home"
+    renderer: renderer_id
+    Renderer:
+        id: renderer_id
+        size: self.parent.size
+        pos: self.parent.pos
