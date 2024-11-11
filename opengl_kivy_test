@@ -1,0 +1,71 @@
+from kivy.app import App
+from kivy.uix.widget import Widget
+from kivy.graphics import RenderContext, Callback
+from OpenGL.GL import *
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.properties import ObjectProperty
+
+class Renderer(Widget):
+    def __init__(self, **kwargs):
+        super(Renderer, self).__init__(**kwargs)
+        self.canvas = RenderContext()
+
+        # Setup OpenGL when the widget is initialized
+        self.canvas.add(Callback(self.setup_gl))
+
+        # Bind the widget size to update OpenGL settings on resize
+        self.bind(size=self.update_gl, pos=self.update_gl)
+        self.update_gl()
+
+    def setup_gl(self, *args):
+        """Setup OpenGL settings."""
+        glEnable(GL_DEPTH_TEST)  # Enable depth testing for 3D rendering
+        glClearColor(1, 1, 1, 1)  # Set the background color to white
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)  # Clear the screen
+
+    def update_gl(self, *args):
+        """Update OpenGL on widget resize or position change."""
+        self.canvas.clear()
+        self.on_draw()
+
+    def on_draw(self):
+        """Render OpenGL content."""
+        # Clear the screen
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        # Set up the projection (orthographic view)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(-2, 2, -2, 2, -10, 10)
+
+        # Set up the model view (camera positioning)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        glTranslatef(0.0, 0.0, -5.0)  # Move the camera slightly back
+
+        # Draw a red rectangle
+        self.draw_rectangle()
+        self.canvas.ask_update()
+
+    def draw_rectangle(self):
+        """Draw a red rectangle in 3D space."""
+        glColor3f(1.0, 0.0, 0.0)  # Set the color to red
+        glBegin(GL_QUADS)
+        glVertex3f(-1.0, -1.0, 0.0)
+        glVertex3f(1.0, -1.0, 0.0)
+        glVertex3f(1.0, 1.0, 0.0)
+        glVertex3f(-1.0, 1.0, 0.0)
+        glEnd()
+
+class HomeScreen(Screen):
+    # Reference the Renderer widget from the .kv file
+    renderer = ObjectProperty(None)
+
+class TestApp(App):
+    def build(self):
+        sm = ScreenManager()
+        sm.add_widget(HomeScreen(name='home'))
+        return sm
+
+if __name__ == '__main__':
+    TestApp().run()
