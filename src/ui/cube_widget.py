@@ -106,11 +106,7 @@ class CubeWidget(Widget):
             faces_to_draw.sort(reverse=False, key=lambda f: f[0])
 
             for _, verts2d, color in faces_to_draw:
-                Color(*color)
-                Quad(points=(verts2d[0][0], verts2d[0][1],
-                             verts2d[1][0], verts2d[1][1],
-                             verts2d[2][0], verts2d[2][1],
-                             verts2d[3][0], verts2d[3][1]))
+                self.draw_face_with_border(verts2d, color, border_color=(0, 0, 0), border_thickness=2)
 
     def update_cube(self, dt):
         self.rotation_x += 1
@@ -135,3 +131,41 @@ class CubeWidget(Widget):
             if axis == 'y' and py == index: return True
             if axis == 'z' and pz == index: return True
         return False
+
+    def draw_face_with_border(self, verts2d, color, border_color=(0, 0, 0, 1), border_thickness=2):
+        # Draw main face
+        Color(*color)
+
+        Quad(points=(
+            verts2d[0][0], verts2d[0][1],
+            verts2d[1][0], verts2d[1][1],
+            verts2d[2][0], verts2d[2][1],
+            verts2d[3][0], verts2d[3][1],
+        ))
+
+        # Draw borders as proper quads
+        Color(*border_color)
+        for i in range(4):
+            p1 = verts2d[i]
+            p2 = verts2d[(i + 1) % 4]
+
+            # Vector along edge
+            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+            length = (dx ** 2 + dy ** 2) ** 0.5
+            if length == 0: continue
+
+            # Normalized perpendicular
+            nx, ny = -dy / length, dx / length
+
+            # Offset half thickness in both directions for proper quad
+            t = border_thickness / 2
+            v0 = (p1[0] + nx * t, p1[1] + ny * t)
+            v1 = (p1[0] - nx * t, p1[1] - ny * t)
+            v2 = (p2[0] - nx * t, p2[1] - ny * t)
+            v3 = (p2[0] + nx * t, p2[1] + ny * t)
+
+            Quad(points=(v0[0], v0[1],
+                         v1[0], v1[1],
+                         v2[0], v2[1],
+                         v3[0], v3[1]))
+
