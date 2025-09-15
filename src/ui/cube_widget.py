@@ -19,7 +19,7 @@ class CubeWidget(Widget):
         self.rotation_y = 30
         self.camera_distance = 8.0  # distance from origin along -Z
         self.scale = SCALE
-
+        self.rotating_slices = []  # ← list of (axis, index) tuples
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LESS)
         # Enable culling
@@ -69,6 +69,7 @@ class CubeWidget(Widget):
         return dot < 0
 
     # --- Drawing ---
+    # --- Drawing ---
     def draw_cube(self):
         self.canvas.clear()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -81,23 +82,23 @@ class CubeWidget(Widget):
                 offset = (px - 1, py - 1, pz - 1)
 
                 for face in piece.faces.values():
+                    # --- Exposure filtering ---
+                    if not self.is_face_exposed(piece, face):
+                        if not self.is_slice_rotating(piece):
+                            continue  # skip hidden internal face
+
                     # offset + rotate
                     verts3d = [(vx + offset[0], vy + offset[1], vz + offset[2])
                                for vx, vy, vz in face.vertices]
                     verts3d = [self.rotate_vertex(v, self.rotation_x, self.rotation_y)
                                for v in verts3d]
 
-                    # normals & culling
-                    normal = self.calculate_face_normal(verts3d)
-                    if not self.is_face_visible(normal):
-                        continue
-
                     # project
                     verts2d = [self.project_vertex(v) for v in verts3d]
                     if any(p is None for p in verts2d):
                         continue
 
-                    # depth
+                    # depth (avg Z in camera space)
                     avg_z = sum(v[2] for v in verts3d) / len(verts3d)
                     faces_to_draw.append((avg_z, verts2d, face.colour))
 
@@ -115,3 +116,22 @@ class CubeWidget(Widget):
         self.rotation_x += 1
         self.rotation_y += 1
         self.draw_cube()
+
+    def is_face_exposed(self, piece, face):
+        px, py, pz = piece.position
+        if face.axis == 'x':
+            return (face.direction == -1 and px == 0) or (face.direction == +1 and px == 2)
+        elif face.axis == 'y':
+            return (face.direction == -1 and py == 0) or (face.direction == +1 and py == 2)
+        elif face.axis == 'z':
+            return (face.direction == -1 and pz == 0) or (face.direction == +1 and pz == 2)
+
+        return False
+
+    def is_slice_rotating(self, piece):
+        px, py, pz = piece.position
+        for axis, index in self.rotating_slices:
+            if axis == 'x' and px == index: return True
+            if axis == 'y' and py == index: return True
+            if axis == 'z' and pz == index: return True
+        return False

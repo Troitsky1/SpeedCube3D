@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 import numpy as np
+from config.cube_defaults import FACE_AXES
 
 if TYPE_CHECKING:
     from .piece import Piece
@@ -8,6 +9,7 @@ if TYPE_CHECKING:
 
 class Face:
     def __init__(self, piece: "Piece", face, colour):
+        self.axis, self.direction = FACE_AXES[face]
         self.piece = piece
         self.colour = colour
         self.face = face

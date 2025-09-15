@@ -60,7 +60,7 @@ class Piece:
     def get_faces(self) -> Dict[str, Face]:
         faces = {}
         for face_name in self.colours:
-            faces[face_name] = Face(self, face_name, self.colours[face_name])
+            faces[face_name] = Face(self, face_name, self.colours[face_name],)
         return faces
 
     def assign_colours(self):

@@ -10,3 +10,11 @@ DEFAULT_FACE_COLORS = {
     'left': np.array([1, 0, 0, 1], dtype=np.float32),     # Red
     'right': np.array([1, 0.5, 0, 1], dtype=np.float32),  # Orange
 }
+FACE_AXES = {
+    'left':  ('x', -1),
+    'right': ('x', +1),
+    'down':  ('y', -1),
+    'up':    ('y', +1),
+    'back':  ('z', -1),
+    'front': ('z', +1),
+}
