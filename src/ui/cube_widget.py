@@ -17,7 +17,7 @@ class CubeWidget(Widget):
         self.cube = Cube()
         self.rotation_x = 25
         self.rotation_y = 30
-        self.camera_distance = 8.0  # distance from origin along -Z
+        self.camera_distance = 10.0  # distance from origin along -Z
         self.scale = SCALE
         self.rotating_slices = []  # ← list of (axis, index) tuples
         glEnable(GL_DEPTH_TEST)
@@ -77,36 +77,68 @@ class CubeWidget(Widget):
         with self.canvas:
             faces_to_draw = []
 
+            # --- Gather faces to draw ---
             for piece in self.cube:
                 px, py, pz = piece.position
                 offset = (px - 1, py - 1, pz - 1)
 
                 for face in piece.faces.values():
-                    # --- Exposure filtering ---
-                    if not self.is_face_exposed(piece, face):
-                        if not self.is_slice_rotating(piece):
-                            continue  # skip hidden internal face
-
-                    # offset + rotate
-                    verts3d = [(vx + offset[0], vy + offset[1], vz + offset[2])
-                               for vx, vy, vz in face.vertices]
-                    verts3d = [self.rotate_vertex(v, self.rotation_x, self.rotation_y)
-                               for v in verts3d]
-
-                    # project
-                    verts2d = [self.project_vertex(v) for v in verts3d]
-                    if any(p is None for p in verts2d):
+                    # --- Skip hidden internal faces unless slice is rotating ---
+                    if not self.is_face_exposed(piece, face) and not self.is_slice_rotating(piece):
                         continue
 
-                    # depth (avg Z in camera space)
+                    # Offset + rotate vertices
+                    verts3d = [(vx, vy, vz)
+                               for vx, vy, vz in face.vertices]
+                    verts3d = [self.rotate_vertex(v, self.rotation_x, self.rotation_y) for v in verts3d]
+
+                    # Project vertices to 2D
+                    verts2d = [self.project_vertex(v) for v in verts3d]
+                    if any(v is None for v in verts2d):
+                        continue
+
+                    # Average Z for sorting
                     avg_z = sum(v[2] for v in verts3d) / len(verts3d)
                     faces_to_draw.append((avg_z, verts2d, face.colour))
 
-            # sort far → near
-            faces_to_draw.sort(reverse=False, key=lambda f: f[0])
+            # Sort far → near for correct overlay
+            faces_to_draw.sort(key=lambda f: f[0])
 
+            # --- Draw faces and borders ---
             for _, verts2d, color in faces_to_draw:
-                self.draw_face_with_border(verts2d, color, border_color=(0, 0, 0), border_thickness=2)
+                # Draw main face
+                Color(*color)
+                Quad(points=(
+                    verts2d[0][0], verts2d[0][1],
+                    verts2d[1][0], verts2d[1][1],
+                    verts2d[2][0], verts2d[2][1],
+                    verts2d[3][0], verts2d[3][1],
+                ))
+
+                # Draw border only if external face
+                face_color = tuple(color)  # convert NumPy array to tuple
+                if face_color[:3] != (0, 0, 0):  # compare only RGB
+                    self.draw_face_border(verts2d, border_color=(0, 0, 0, 1), border_width=1)
+
+    def draw_face_border(self, verts2d, border_color=(0, 0, 0, 1), border_width=1.0):
+        Color(*border_color)
+        inset_pixels = 2  # desired inset in screen pixels
+        inset = inset_pixels #* self.scale  # compensate for zoom
+
+        for i in range(4):
+            p1 = verts2d[i]
+            p2 = verts2d[(i + 1) % 4]
+
+            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+            length = (dx ** 2 + dy ** 2) ** 0.5
+            if length == 0:
+                continue
+            nx, ny = dx / length, dy / length
+
+            start = (p1[0] + nx * inset, p1[1] + ny * inset)
+            end = (p2[0] - nx * inset, p2[1] - ny * inset)
+
+            Line(points=[start[0], start[1], end[0], end[1]], width=border_width)
 
     def update_cube(self, dt):
         self.rotation_x += 1
@@ -131,41 +163,3 @@ class CubeWidget(Widget):
             if axis == 'y' and py == index: return True
             if axis == 'z' and pz == index: return True
         return False
-
-    def draw_face_with_border(self, verts2d, color, border_color=(0, 0, 0, 1), border_thickness=2):
-        # Draw main face
-        Color(*color)
-
-        Quad(points=(
-            verts2d[0][0], verts2d[0][1],
-            verts2d[1][0], verts2d[1][1],
-            verts2d[2][0], verts2d[2][1],
-            verts2d[3][0], verts2d[3][1],
-        ))
-
-        # Draw borders as proper quads
-        Color(*border_color)
-        for i in range(4):
-            p1 = verts2d[i]
-            p2 = verts2d[(i + 1) % 4]
-
-            # Vector along edge
-            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            length = (dx ** 2 + dy ** 2) ** 0.5
-            if length == 0: continue
-
-            # Normalized perpendicular
-            nx, ny = -dy / length, dx / length
-
-            # Offset half thickness in both directions for proper quad
-            t = border_thickness / 2
-            v0 = (p1[0] + nx * t, p1[1] + ny * t)
-            v1 = (p1[0] - nx * t, p1[1] - ny * t)
-            v2 = (p2[0] - nx * t, p2[1] - ny * t)
-            v3 = (p2[0] + nx * t, p2[1] + ny * t)
-
-            Quad(points=(v0[0], v0[1],
-                         v1[0], v1[1],
-                         v2[0], v2[1],
-                         v3[0], v3[1]))
-
