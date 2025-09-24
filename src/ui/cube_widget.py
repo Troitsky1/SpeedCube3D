@@ -4,71 +4,63 @@ from kivy.graphics import *
 from kivy.clock import Clock
 from kivy.graphics.opengl import *
 from kivy.config import Config
-from math import sin, cos, radians
+import numpy as np
+
 from cube.cube import Cube
 from config.cube_defaults import SCALE
+from utils.ray_casting import screen_to_world_ray, pick_closest_visible_face, vector_from_face_center_to_ray
+from utils.camera import Camera
+from ui.debug import draw_debug_vectors
 
 Config.set('graphics', 'depthbuffer', 1)
+
+
+def normalize(v):
+    return v / np.linalg.norm(v) if np.linalg.norm(v) > 1e-8 else v
 
 
 class CubeWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.cube = Cube()
-        self.rotation_x = 25
-        self.rotation_y = 30
-        self.camera_distance = 10.0  # distance from origin along -Z
         self.scale = SCALE
-        self.rotating_slices = []  # ← list of (axis, index) tuples
+        self.rotating_slice = None
+
+        # State for interaction
+        self.selected_face = None
+        self.face_center = None
+        self.face_normal = None
+        self.corner_vectors = None
+
+        # Camera: looking at origin from Z+
+        self.camera = Camera(
+            position=(0, 0, 6),
+            target=(0, 0, 0),
+            up=(0, 1, 0),
+            fov=60.0,
+            aspect=self.width / self.height
+        )
+
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LESS)
-        # Enable culling
         glEnable(GL_CULL_FACE)
-        glCullFace(GL_BACK)  # discard back faces
-        glFrontFace(GL_CW)  # front faces are counter-clockwise
+        glCullFace(GL_BACK)
+        glFrontFace(GL_CW)
 
         Clock.schedule_interval(self.update_cube, 1 / 60)
 
-    # --- Rotation ---
-    def rotate_vertex(self, vertex, angle_x, angle_y):
-        x, y, z = vertex
-        # rotate around X axis
-        cos_x, sin_x = cos(radians(angle_x)), sin(radians(angle_x))
-        y, z = y * cos_x - z * sin_x, y * sin_x + z * cos_x
-        # rotate around Y axis
-        cos_y, sin_y = cos(radians(angle_y)), sin(radians(angle_y))
-        x, z = x * cos_y + z * sin_y, -x * sin_y + z * cos_y
-        return x, y, z
+    # --- Visibility ---
+    def is_face_visible(self, normal, face_center):
+        view_vec = np.array(face_center) - np.array(self.camera.position)
+        return np.dot(normal, view_vec) < 0
 
-    # --- Projection (camera at origin looking +Z) ---
-    def project_vertex(self, vertex):
-        x, y, z = vertex
-        z += self.camera_distance  # push cube in front of camera
-        if z <= 0:
-            return None
-        f = 4.0  # focal length
-        x_proj = (x / z) * f * self.scale + self.center_x
-        y_proj = (y / z) * f * self.scale + self.center_y
-        return x_proj, y_proj
-
-    # --- Normals ---
-    def calculate_face_normal(self, verts3d):
-        p1, p2, p3 = verts3d[:3]
-        v1 = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
-        v2 = (p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2])
+    def is_piece_in_rotating_slice(self, piece) -> bool:
         return (
-            v1[1] * v2[2] - v1[2] * v2[1],
-            v1[2] * v2[0] - v1[0] * v2[2],
-            v1[0] * v2[1] - v1[1] * v2[0],
+            hasattr(self, "rotating_slice")
+            and self.rotating_slice is not None
+            and piece.position in self.rotating_slice.positions
         )
 
-    def is_face_visible(self, normal):
-        # Camera looks down +Z, so visible faces have normals pointing toward -Z
-        view_dir = (0, 0, 1)
-        dot = sum(n * v for n, v in zip(normal, view_dir))
-        return dot < 0
-
-    # --- Drawing ---
     # --- Drawing ---
     def draw_cube(self):
         self.canvas.clear()
@@ -77,36 +69,21 @@ class CubeWidget(Widget):
         with self.canvas:
             faces_to_draw = []
 
-            # --- Gather faces to draw ---
             for piece in self.cube:
-                px, py, pz = piece.position
-                offset = (px - 1, py - 1, pz - 1)
-
                 for face in piece.faces.values():
-                    # --- Skip hidden internal faces unless slice is rotating ---
-                    if not self.is_face_exposed(piece, face) and not self.is_slice_rotating(piece):
+                    if not self.is_face_visible(face.normal, face.centre):
                         continue
 
-                    # Offset + rotate vertices
-                    verts3d = [(vx, vy, vz)
-                               for vx, vy, vz in face.vertices]
-                    verts3d = [self.rotate_vertex(v, self.rotation_x, self.rotation_y) for v in verts3d]
-
-                    # Project vertices to 2D
-                    verts2d = [self.project_vertex(v) for v in verts3d]
-                    if any(v is None for v in verts2d):
+                    verts_world = [np.array(v) for v in face.vertices]
+                    verts_screen, depth = self.camera.world_to_screen(verts_world, self.width, self.height)
+                    if verts_screen is None:
                         continue
 
-                    # Average Z for sorting
-                    avg_z = sum(v[2] for v in verts3d) / len(verts3d)
-                    faces_to_draw.append((avg_z, verts2d, face.colour))
+                    faces_to_draw.append((depth, verts_screen, face.colour))
 
-            # Sort far → near for correct overlay
-            faces_to_draw.sort(key=lambda f: f[0])
+            faces_to_draw.sort(key=lambda f: f[0])  # sort far → near
 
-            # --- Draw faces and borders ---
             for _, verts2d, color in faces_to_draw:
-                # Draw main face
                 Color(*color)
                 Quad(points=(
                     verts2d[0][0], verts2d[0][1],
@@ -114,52 +91,84 @@ class CubeWidget(Widget):
                     verts2d[2][0], verts2d[2][1],
                     verts2d[3][0], verts2d[3][1],
                 ))
-
-                # Draw border only if external face
-                face_color = tuple(color)  # convert NumPy array to tuple
-                if face_color[:3] != (0, 0, 0):  # compare only RGB
-                    self.draw_face_border(verts2d, border_color=(0, 0, 0, 1), border_width=1)
+                if tuple(color[:3]) != (0, 0, 0):
+                    self.draw_face_border(verts2d)
 
     def draw_face_border(self, verts2d, border_color=(0, 0, 0, 1), border_width=1.0):
         Color(*border_color)
-        inset_pixels = 2  # desired inset in screen pixels
-        inset = inset_pixels #* self.scale  # compensate for zoom
-
         for i in range(4):
             p1 = verts2d[i]
             p2 = verts2d[(i + 1) % 4]
+            Line(points=[p1[0], p1[1], p2[0], p2[1]], width=border_width)
 
-            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            length = (dx ** 2 + dy ** 2) ** 0.5
-            if length == 0:
-                continue
-            nx, ny = dx / length, dy / length
-
-            start = (p1[0] + nx * inset, p1[1] + ny * inset)
-            end = (p2[0] - nx * inset, p2[1] - ny * inset)
-
-            Line(points=[start[0], start[1], end[0], end[1]], width=border_width)
-
+    # --- Animation ---
     def update_cube(self, dt):
-        self.rotation_x += 1
-        self.rotation_y += 1
+        # Example: orbit camera slowly around Y axis
+        angle = np.radians(20 * dt)
+        x, y, z = self.camera.position
+        x_new = x * np.cos(angle) - z * np.sin(angle)
+        z_new = x * np.sin(angle) + z * np.cos(angle)
+        self.camera.position = (x_new, y, z_new)
         self.draw_cube()
 
-    def is_face_exposed(self, piece, face):
-        px, py, pz = piece.position
-        if face.axis == 'x':
-            return (face.direction == -1 and px == 0) or (face.direction == +1 and px == 2)
-        elif face.axis == 'y':
-            return (face.direction == -1 and py == 0) or (face.direction == +1 and py == 2)
-        elif face.axis == 'z':
-            return (face.direction == -1 and pz == 0) or (face.direction == +1 and pz == 2)
+    # --- Touch ---
+    def on_touch_down(self, touch):
+        ray_dir = screen_to_world_ray(
+            touch.x, touch.y,
+            self.width, self.height,
+            np.array(self.camera.position),
+            self.camera.direction,
+            self.camera.up,
+            self.camera.fov,
+            self.camera.position-(0,0,0)
+        )
 
-        return False
+        result = pick_closest_visible_face(self.cube, np.array(self.camera.position), ray_dir)
+        if result is None:
+            return
+        face_center, face_normal, piece, face = result
 
-    def is_slice_rotating(self, piece):
-        px, py, pz = piece.position
-        for axis, index in self.rotating_slices:
-            if axis == 'x' and px == index: return True
-            if axis == 'y' and py == index: return True
-            if axis == 'z' and pz == index: return True
-        return False
+        # Store interaction state
+        self.selected_face = face
+        self.face_center = face_center
+        self.face_normal = face_normal
+        self.corner_vectors = [corner - face_center for corner in face.vertices]
+
+        # Initial debug draw (optional)
+        intersection = vector_from_face_center_to_ray(face_center, face_normal, self.camera.position, ray_dir)
+        if intersection is not None:
+            c_to_p = intersection - face_center
+            draw_debug_vectors(self, self.camera.position, ray_dir, face_center, face_normal, c_to_p, self.corner_vectors)
+
+    def on_touch_move(self, touch):
+        if self.selected_face is None:
+            return
+
+        ray_dir = screen_to_world_ray(
+            touch.x, touch.y,
+            self.width, self.height,
+            np.array(self.camera.position),
+            self.camera.direction,
+            self.camera.up,
+            self.camera.fov,
+            1.0
+        )
+
+        c_to_p = vector_from_face_center_to_ray(self.face_center, self.face_normal, self.camera.position, ray_dir)
+        if c_to_p is None:
+            return
+
+        # Find closest two corner vectors
+        c_to_p_n = normalize(c_to_p)
+        dots = [np.dot(c_to_p_n, normalize(v)) for v in self.corner_vectors]
+        idx1, idx2 = np.argsort([-d for d in dots])[:2]  # pick two with highest dot product
+        v1, v2 = self.corner_vectors[idx1], self.corner_vectors[idx2]
+
+        # Compute bisector vector
+        bisector = normalize(v1 + v2)
+
+        # Debug draw (optional)
+        draw_debug_vectors(self, self.camera.position, ray_dir, self.face_center, self.face_normal, c_to_p, self.corner_vectors)
+        with self.canvas:
+            Color(0, 1, 1)  # cyan for bisector
+            Line(points=[*self.face_center, *(self.face_center + bisector)], width=2)
