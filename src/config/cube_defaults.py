@@ -1,6 +1,6 @@
 import numpy as np
 
-SCALE = 100
+SCALE = 10
 DEFAULT_SIZE = 3  # 3x3x3 cube\
 DEFAULT_FACE_COLORS = {
     'up': np.array([1, 1, 1, 1], dtype=np.float32),       # White
