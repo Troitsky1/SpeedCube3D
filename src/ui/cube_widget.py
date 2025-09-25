@@ -19,6 +19,7 @@ class CubeWidget(Widget):
         self.cube = Cube()
         self.scale = SCALE
         self.rotating_slices = []
+        self.background_clicked = True #***************REPLACE WITH CHECKER FUNCTION******************
 
         # Camera starts on +Z looking at origin
         self.camera = Camera(
@@ -92,7 +93,7 @@ class CubeWidget(Widget):
     # -------------------
     def update_cube(self, dt):
         """Orbit camera around cube instead of rotating cube."""
-        self.camera.orbit(dx=30*dt, dy=30*dt)
+        #self.camera.orbit(dx=30*dt, dy=30*dt)
         self.draw_cube()
 
     # -------------------
@@ -118,3 +119,10 @@ class CubeWidget(Widget):
             if axis == 'z' and pz == index:
                 return True
         return False
+
+    def on_touch_move(self, touch):
+        if self.background_clicked:  # you’ll add this condition
+            dx = touch.dx
+            dy = - touch.dy
+            self.camera.orbit(dx, dy)
+            self.draw_cube()
