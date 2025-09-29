@@ -106,18 +106,18 @@ class Camera:
         R[:3, :3] = np.vstack([r, u, -f])
         view_matrix = R @ T
 
-        # --- Keep your width dependency ---
-        cube_width = scale
-        cube_height = cube_width * (height / width)
-
-        # --- Perspective projection matrix ---
+        # --- Perspective projection, based on shorter dimension ---
         fov_rad = np.radians(self.fov)
         f_n = 1.0 / np.tan(fov_rad / 2.0)
         z_near, z_far = self.near, self.far
 
+        aspect = width / height
+        min_dim = min(width, height)
+        scale_factor = min_dim / height  # normalize against height
+
         proj_matrix = np.zeros((4, 4))
-        proj_matrix[0, 0] = f_n / (width / height)  # aspect ratio correction
-        proj_matrix[1, 1] = f_n
+        proj_matrix[0, 0] = (f_n / aspect) * scale_factor
+        proj_matrix[1, 1] = f_n * scale_factor
         proj_matrix[2, 2] = (z_far + z_near) / (z_near - z_far)
         proj_matrix[2, 3] = (2 * z_far * z_near) / (z_near - z_far)
         proj_matrix[3, 2] = -1.0
@@ -127,18 +127,13 @@ class Camera:
             v_h = np.array([*v, 1.0])
             v_view = view_matrix @ v_h
             v_clip = proj_matrix @ v_view
-
             if v_clip[3] == 0:
                 continue
 
-            # perspective divide
             v_ndc = v_clip[:3] / v_clip[3]
-
-            # Cull if outside clip volume
             if np.any(np.abs(v_ndc) > 1):
                 continue
 
-            # screen mapping (unchanged)
             x_screen = (v_ndc[0] + 1) * 0.5 * width
             y_screen = (1 - (v_ndc[1] + 1) * 0.5) * height
             verts_2d.append((x_screen, y_screen))

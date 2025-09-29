@@ -43,12 +43,14 @@ class Face:
         vertices = self.vertices
         a = np.subtract(vertices[1], vertices[0])
         b = np.subtract(vertices[2], vertices[0])
-        normal = np.cross(a, b)
+        normal = - np.cross(a, b)
         norm_mag = np.linalg.norm(normal)
         if norm_mag != 0:
             normal = normal / norm_mag
-        if self.face in ['left', 'back', 'down']:
-            normal *= -1
+
+        #if self.face in ['left', 'back', 'down']:
+        #    normal *= -1
+
         return normal
 
     def apply_internal_offset(self, epsilon=0.001):

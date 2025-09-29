@@ -5,7 +5,7 @@ from cube.cube import Cube
 from cube.piece import Piece
 from cube.face import Face
 from cube.slice import Slice  # forward reference for type hints
-
+from utils.camera import Camera
 
 # --------------------------
 # Camera / Ray Utilities
@@ -91,7 +91,7 @@ def pick_closest_visible_face(
     ray_dir: np.ndarray
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Piece], Optional[Face]]:
     """
-    Return the closest visible face along a ray.
+    Return the closest *actual* visible face hit by the ray.
     """
     camera_dir = -ray_origin / np.linalg.norm(ray_origin)
     closest_face: Optional[Face] = None
@@ -100,28 +100,37 @@ def pick_closest_visible_face(
     face_center_out: Optional[np.ndarray] = None
     face_normal_out: Optional[np.ndarray] = None
 
-    for piece in cube:  # Uses Cube.__iter__
+    for piece in cube:  # Cube.__iter__ yields pieces
         for face in piece.faces.values():
-            # Only consider faces pointing toward the camera
+            # Skip back-facing faces
             if np.dot(face.normal, camera_dir) <= 0:
                 continue
-            if face.colour == (0.0, 0.0, 0.0):
+            # Skip black/internal faces
+            if np.allclose(face.colour[:3], (0.0, 0.0, 0.0)):
                 continue
 
-            vec_to_ray = vector_from_face_center_to_ray(face.centre, face.normal, ray_origin, ray_dir)
-            if vec_to_ray is None:
-                continue
+            denom = np.dot(face.normal, ray_dir)
+            if np.isclose(denom, 0):
+                continue  # ray parallel to plane
 
-            distance = np.linalg.norm(vec_to_ray)
-            if float(distance) < shortest_distance:
-                shortest_distance = float(distance)
+            t = np.dot(face.normal, face.centre - ray_origin) / denom
+            if t <= 0:
+                continue  # intersection behind camera
+
+            intersection = ray_origin + t * ray_dir
+
+            if not point_in_face(face, intersection):
+                continue  # intersection outside quad
+
+            distance = np.linalg.norm(intersection - ray_origin)
+            if distance < shortest_distance:
+                shortest_distance = distance
                 closest_face = face
                 closest_piece = piece
                 face_center_out = face.centre
                 face_normal_out = face.normal
 
     return face_center_out, face_normal_out, closest_piece, closest_face
-
 
 def calculate_face_plane_vectors(normal: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -207,3 +216,50 @@ def find_slice_to_rotate_and_direction(
             cw = False
 
     return cw, rotation_normal, selected_slice
+
+def pick_face_and_vectors(cube: Cube, camera, screen_x, screen_y, width, height):
+    # Ray
+    ray_origin, ray_dir = camera.get_ray(screen_x, screen_y, width, height)
+
+    # Closest face
+    f_center, f_normal, piece, face = pick_closest_visible_face(cube, ray_origin, ray_dir)
+    if face is None:
+        return None
+
+    # Compute intersection point directly
+    denom = np.dot(f_normal, ray_dir)
+    t = np.dot(f_normal, f_center - ray_origin) / denom
+    intersection = ray_origin + t * ray_dir
+
+    # Quadrant vectors centered on intersection point
+    right, up = calculate_face_plane_vectors(f_normal)
+    quadrants = [right, up, -right, -up]
+    quadrants = [q / np.linalg.norm(q) for q in quadrants]  # normalize
+    quadrants = [intersection + q for q in quadrants]       # anchor at intersection]
+
+    return {
+        "ray": (np.array(ray_origin, dtype=np.float32), np.array(ray_dir, dtype=np.float32)),
+        "face_center": np.array(f_center, dtype=np.float32),
+        "face_normal": np.array(f_normal, dtype=np.float32),
+        "piece": piece,
+        "face": face,
+        "intersection": intersection,  # 👈 new
+        "quadrants": quadrants
+    }
+
+def point_in_face(face, intersection):
+    verts = face.vertices
+    # convert to numpy array
+    verts = np.array(verts)
+    # get two edges
+    edge1 = verts[1] - verts[0]
+    edge2 = verts[3] - verts[0]
+    # vector from v0 to intersection
+    vp = intersection - verts[0]
+    # solve for local coords (u,v)
+    denom = np.dot(edge1, edge1) * np.dot(edge2, edge2) - np.dot(edge1, edge2)**2
+    if np.isclose(denom, 0):
+        return False
+    u = (np.dot(vp, edge1) * np.dot(edge2, edge2) - np.dot(vp, edge2) * np.dot(edge1, edge2)) / denom
+    v = (np.dot(vp, edge2) * np.dot(edge1, edge1) - np.dot(vp, edge1) * np.dot(edge1, edge2)) / denom
+    return 0 <= u <= 1 and 0 <= v <= 1
