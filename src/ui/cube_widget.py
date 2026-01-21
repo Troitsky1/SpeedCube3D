@@ -1,9 +1,11 @@
 # ui/cube_widget.py
 from kivy.uix.widget import Widget
-from kivy.graphics import *
+#from kivy.graphics import *
 from kivy.clock import Clock
-from kivy.graphics.opengl import *
-from kivy.config import Config
+#from kivy.graphics.opengl import *
+from kivy.graphics import Callback, InstructionGroup, Color, Line, Quad
+from renderer.gl_state import clear_color_depth, depth_off, depth_on
+
 import numpy as np
 
 from cube.cube import Cube
@@ -11,7 +13,7 @@ from config.cube_defaults import SCALE
 from utils.camera import Camera
 from utils.ray_casting import pick_face_and_vectors
 from utils.face_picking import intersect_with_plane
-Config.set('graphics', 'depthbuffer', 1)
+
 
 
 class CubeWidget(Widget):
@@ -41,10 +43,10 @@ class CubeWidget(Widget):
         self.cube_canvas = InstructionGroup()
         self.debug_canvas = InstructionGroup()
         self.canvas.add(self.cube_canvas)
-        self.canvas.add(self.debug_canvas)
+        self.canvas.after.add(self.debug_canvas)
 
         glEnable(GL_DEPTH_TEST)
-        glDepthFunc(GL_LESS)
+        glDepthFunc(GL_LEQUAL)
         glEnable(GL_CULL_FACE)
         glCullFace(GL_BACK)
         glFrontFace(GL_CW)
@@ -56,6 +58,8 @@ class CubeWidget(Widget):
     # -------------------
     def draw_cube(self):
         self.cube_canvas.clear()
+        self.cube_canvas.add(Callback(_gl_clear))
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         faces_to_draw = []
@@ -79,7 +83,7 @@ class CubeWidget(Widget):
         faces_to_draw.sort(key=lambda f: f[0], reverse=True)
 
         for _, verts2d, color in faces_to_draw:
-            '''
+
             self.cube_canvas.add(Color(*color))
             self.cube_canvas.add(Quad(points=[
                 verts2d[0][0], verts2d[0][1],
@@ -87,14 +91,18 @@ class CubeWidget(Widget):
                 verts2d[2][0], verts2d[2][1],
                 verts2d[3][0], verts2d[3][1],
             ]))
-            '''
+
+
             # Draw black outline for non-internal faces
-            if tuple(color[:3]) != (0, 0, 0):
-                self.draw_face_border(verts2d)
+        #    if tuple(color[:3]) != (0, 0, 0):
+        #        self.draw_face_border(verts2d)
 
         #debugging
+        self.debug_canvas.clear()
+        self.cube_canvas.add(Callback(_disable_depth))
         for start3d, end3d, color in self.debug_vectors:
             self.draw_debug_vector(start3d, end3d, color)
+        self.cube_canvas.add(Callback(_enable_depth))
 
     def draw_face_border(self, verts2d, border_color=(0, 0, 0, 1), border_width=1.0):
         self.cube_canvas.add(Color(*border_color))
@@ -216,3 +224,9 @@ class CubeWidget(Widget):
     def on_size(self, *args):
         # Keep camera aspect in sync with widget dimensions
         self.camera.aspect = self.width / max(1, self.height)
+
+def _disable_depth(*args):
+    glDisable(GL_DEPTH_TEST)
+
+def _enable_depth(*args):
+    glEnable(GL_DEPTH_TEST)

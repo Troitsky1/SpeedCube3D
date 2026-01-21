@@ -1,3 +1,6 @@
+from kivy.config import Config
+Config.set('graphics', 'depthbuffer', 1)
+
 from kivy.app import App
 from ui.cube_widget import CubeWidget
 from kivy.core.window import Window
